@@ -28,6 +28,9 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+
 [project.scripts]
 refcompare = "refcompare.cli:main"
 
