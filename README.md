@@ -9,7 +9,7 @@ It is designed for small user-supplied batches (typically a few dozen seed works
 Requires Python 3.10 or newer.
 
 ```bash
-git clone <repository-url-shown-on-this-page>
+git clone https://github.com/kight687687-coder/RefCompare.git
 cd RefCompare
 python -m pip install .
 refcompare --help

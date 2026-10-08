@@ -7,7 +7,7 @@ RefCompare 是一个 Python 命令行工具，用于比较 OpenAlex 与 Crossref
 需要 Python 3.10 或更高版本：
 
 ```powershell
-git clone <本仓库页面显示的地址>
+git clone https://github.com/kight687687-coder/RefCompare.git
 cd RefCompare
 python -m pip install .
 refcompare --help
