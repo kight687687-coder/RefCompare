@@ -87,6 +87,24 @@ def _safe_stat(value: float) -> float | None:
     return float(value) if np.isfinite(value) else None
 
 
+def _ordered_scores(scores: pd.Series) -> pd.Series:
+    """Sort scores descending, with DOI ascending for exact score ties."""
+    return scores.sort_index().sort_values(ascending=False, kind="stable")
+
+
+def _expanded_cutoff(left: pd.Series, right: pd.Series, k: int, prefix: str) -> dict[str, object]:
+    left_set = set(left.loc[left >= left.iloc[k - 1]].index) if k else set()
+    right_set = set(right.loc[right >= right.iloc[k - 1]].index) if k else set()
+    intersection, union = len(left_set & right_set), len(left_set | right_set)
+    return {
+        f"{prefix}_tie_expanded_left_size": len(left_set),
+        f"{prefix}_tie_expanded_right_size": len(right_set),
+        f"{prefix}_tie_expanded_intersection": intersection,
+        f"{prefix}_tie_expanded_union": union,
+        f"{prefix}_tie_expanded_jaccard": intersection / union if union else None,
+    }
+
+
 def compare_rankings(
     scores: dict[str, pd.Series], top_fraction: float = 0.10
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -103,15 +121,16 @@ def compare_rankings(
         left_rank = left.rank(ascending=False, method="min")
         right_rank = right.rank(ascending=False, method="min")
         top_n = min(n, max(1, int(n * top_fraction))) if n else 0
-        left_top = set(left.sort_values(ascending=False).head(top_n).index)
-        right_top = set(right.sort_values(ascending=False).head(top_n).index)
+        left_ordered, right_ordered = _ordered_scores(left), _ordered_scores(right)
+        left_top = set(left_ordered.head(top_n).index)
+        right_top = set(right_ordered.head(top_n).index)
         overlap = len(left_top & right_top)
         top10_n = min(n, 10)
         top20_n = min(n, 20)
-        left_top10 = set(left.sort_values(ascending=False).head(top10_n).index)
-        right_top10 = set(right.sort_values(ascending=False).head(top10_n).index)
-        left_top20 = set(left.sort_values(ascending=False).head(top20_n).index)
-        right_top20 = set(right.sort_values(ascending=False).head(top20_n).index)
+        left_top10 = set(left_ordered.head(top10_n).index)
+        right_top10 = set(right_ordered.head(top10_n).index)
+        left_top20 = set(left_ordered.head(top20_n).index)
+        right_top20 = set(right_ordered.head(top20_n).index)
         top10_overlap = len(left_top10 & right_top10)
         top20_overlap = len(left_top20 & right_top20)
         if n >= 2:
@@ -140,6 +159,10 @@ def compare_rankings(
             "top20_n": top20_n,
             "top20_overlap_count": top20_overlap,
             "top20_agreement_rate": top20_overlap / top20_n if top20_n else 0.0,
+            **_expanded_cutoff(left_ordered, right_ordered, top_n, "top_fraction"),
+            **_expanded_cutoff(left_ordered, right_ordered, top10_n, "top10"),
+            **_expanded_cutoff(left_ordered, right_ordered, top20_n, "top20"),
+            "normalized_mean_displacement_percent": 100 * displacement["rank_displacement_mean"] / (n - 1) if n > 1 else None,
             **displacement,
         })
         for doi in common:
@@ -152,9 +175,14 @@ def compare_rankings(
                 f"{left_name}_rank": float(left_rank.loc[doi]),
                 f"{right_name}_rank": float(right_rank.loc[doi]),
                 "rank_change_abs": float(abs(left_rank.loc[doi] - right_rank.loc[doi])),
-                "left_top10": doi in set(left.sort_values(ascending=False).head(min(10, n)).index),
-                "right_top10": doi in set(right.sort_values(ascending=False).head(min(10, n)).index),
-                "left_top20": doi in set(left.sort_values(ascending=False).head(min(20, n)).index),
-                "right_top20": doi in set(right.sort_values(ascending=False).head(min(20, n)).index),
+                "left_top10": doi in left_top10,
+                "right_top10": doi in right_top10,
+                "left_top20": doi in left_top20,
+                "right_top20": doi in right_top20,
             })
-    return pd.DataFrame(summaries), pd.DataFrame(detail_rows)
+    detail_columns = list(dict.fromkeys([
+        "doi", "left_graph", "right_graph",
+        *[f"{name}_{suffix}" for name in scores for suffix in ("asp", "rank")],
+        "rank_change_abs", "left_top10", "right_top10", "left_top20", "right_top20",
+    ]))
+    return pd.DataFrame(summaries), pd.DataFrame(detail_rows, columns=detail_columns)

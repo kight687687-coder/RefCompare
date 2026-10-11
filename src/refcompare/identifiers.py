@@ -48,3 +48,16 @@ def read_doi_file(path: Path) -> tuple[list[str], list[dict[str, object]]]:
     if not rows:
         raise ValueError(f"No DOI entries found in input file: {path}")
     return unique, rows
+
+
+def normalize_record_doi(value: object) -> str | None:
+    """Apply the study's operational DOI rule to retrieved graph records.
+
+    This preserves the study's observed identifiers, including malformed
+    suffixes. It checks shape, not DOI registration or syntactic validity.
+    User-supplied seed input continues to use normalize_doi's stricter rule.
+    """
+    if not isinstance(value, str):
+        return None
+    doi = _PREFIX_PATTERN.sub("", value.strip().lower()).strip().rstrip(".,;:)]}>")
+    return doi if doi.startswith("10.") and "/" in doi else None

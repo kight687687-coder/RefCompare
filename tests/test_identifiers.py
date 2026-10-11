@@ -17,3 +17,12 @@ def test_read_doi_file_reports_invalid_and_duplicate_rows(tmp_path: Path):
     dois, rows = read_doi_file(path)
     assert dois == ["10.1234/abc"]
     assert [row["status"] for row in rows] == ["valid", "duplicate", "invalid"]
+
+
+def test_record_identifiers_match_study_rule_without_weakening_seed_validation():
+    from refcompare.identifiers import normalize_doi, normalize_record_doi
+    for value in ("10.339/fphar.2017.00744", "10.1016/j.semarthrit. 2011.09.008"):
+        assert normalize_doi(value) is None
+        assert normalize_record_doi(value) == value
+    assert normalize_record_doi("https://doi.org/10.1000/EXAMPLE.") == "10.1000/example"
+    assert normalize_record_doi("invalid") is None

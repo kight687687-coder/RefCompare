@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from .identifiers import normalize_doi
+from .identifiers import normalize_doi, normalize_record_doi
 
 
 def _reference_dois(message: dict[str, Any]) -> list[object]:
@@ -33,8 +33,8 @@ def compare_seed_references(openalex_work: dict[str, Any], crossref_record: dict
     oa_values = openalex_work.get("referenced_dois") or []
     crossref_message = crossref_record.get("message") or {}
     cr_values = _reference_dois(crossref_message)
-    oa_set = {normalized for value in oa_values if (normalized := normalize_doi(value))}
-    cr_set = {normalized for value in cr_values if (normalized := normalize_doi(value))}
+    oa_set = {normalized for value in oa_values if (normalized := normalize_record_doi(value))}
+    cr_set = {normalized for value in cr_values if (normalized := normalize_record_doi(value))}
     shared = oa_set & cr_set
     oa_only = oa_set - cr_set
     cr_only = cr_set - oa_set

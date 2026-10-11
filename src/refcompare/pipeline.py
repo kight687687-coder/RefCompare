@@ -19,6 +19,20 @@ from .networks import GRAPH_NAMES, build_graph_edges, graph_statistics
 from .references import analyze_reference_sets, reference_group_summary
 from .report import write_report
 
+DEFAULT_ANALYSIS_SETTINGS = {
+    "graph_scope": "clean-comparable",
+    "ranking_scope": "common-references",
+}
+
+
+def resolve_analysis_settings(overrides: dict[str, object] | None = None) -> dict[str, object]:
+    settings = {**DEFAULT_ANALYSIS_SETTINGS, **(overrides or {})}
+    if settings["graph_scope"] not in {"clean-comparable", "all-records"}:
+        raise ValueError("graph_scope must be clean-comparable or all-records")
+    if settings["ranking_scope"] not in {"common-references", "all-common-nodes"}:
+        raise ValueError("ranking_scope must be common-references or all-common-nodes")
+    return settings
+
 
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,9 +68,11 @@ def run_online(
     output_dir: Path,
     settings: ApiSettings,
     asp_settings: dict[str, object],
+    analysis_settings: dict[str, object] | None = None,
 ) -> Path:
     """Fetch user-selected seed works and return the completed run manifest path."""
     output_dir = Path(output_dir)
+    analysis_settings = resolve_analysis_settings(analysis_settings)
     output_dir.mkdir(parents=True, exist_ok=True)
     clean_dois = list(dict.fromkeys(filter(None, (normalize_doi(value) for value in dois))))
     if not clean_dois:
@@ -69,6 +85,7 @@ def run_online(
         "started_at_utc": started,
         "input_doi_count": len(clean_dois),
         "asp_settings": asp_settings,
+        "analysis_settings": analysis_settings,
         "snapshots": {},
         "api_counts": {"openalex_success": 0, "openalex_failure": 0, "crossref_success": 0, "crossref_failure": 0, "citing_success": 0, "citing_failure": 0},
     }
@@ -136,21 +153,28 @@ def run_online(
     manifest["status"] = "completed" if not manifest["api_counts"]["openalex_failure"] and not manifest["api_counts"]["crossref_failure"] and not manifest["api_counts"]["citing_failure"] else "partial"
     manifest["completed_at_utc"] = datetime.now(timezone.utc).isoformat()
     manifest["tool_version"] = __version__
-    tables = calculate_tables(snapshots, asp_settings)
+    tables = calculate_tables(snapshots, asp_settings, analysis_settings)
     outputs = write_tables(output_dir, tables, manifest)
     manifest["outputs"] = {key: str(path.relative_to(output_dir)) for key, path in outputs.items()}
     write_manifest(manifest_path, manifest)
     return manifest_path
 
 
-def calculate_tables(snapshots: dict[str, Any], asp_settings: dict[str, object]) -> dict[str, pd.DataFrame]:
+def calculate_tables(
+    snapshots: dict[str, Any], asp_settings: dict[str, object],
+    analysis_settings: dict[str, object] | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Score full graphs, then compare pairwise eligible ranking objects."""
+    analysis_settings = resolve_analysis_settings(analysis_settings)
     openalex_works = snapshots.get("openalex_works", [])
     openalex_by_doi = {doi: work for work in openalex_works if (doi := normalize_doi(work.get("doi"))) and work.get("status_code") == 200}
     crossref_by_doi = snapshots.get("crossref_records", {})
     references = analyze_reference_sets(openalex_works, crossref_by_doi)
     seed_rows = references if not references.empty else pd.DataFrame(columns=["doi", "comparison_group"])
+    if analysis_settings["graph_scope"] == "clean-comparable":
+        seed_rows = seed_rows.loc[seed_rows["comparison_group"] == "comparable_both_doi_sets_nonempty"]
     graphs = build_graph_edges(seed_rows, openalex_by_doi, crossref_by_doi, snapshots.get("citing_by_seed", {}))
-    seed_dois = set(snapshots.get("seed_dois", []))
+    seed_dois = set(seed_rows["doi"])
     graph_stats = graph_statistics(graphs, seed_dois)
     scores: dict[str, pd.Series] = {}
     asp_rows: list[dict[str, Any]] = []
@@ -164,14 +188,27 @@ def calculate_tables(snapshots: dict[str, Any], asp_settings: dict[str, object])
             tolerance=float(asp_settings.get("tolerance", 1e-8)),
             max_iter=int(asp_settings.get("max_iter", 100)),
         )
-        scores[graph_name] = score
         asp_rows.extend({"graph": graph_name, "doi": doi, "asp_score": value, **status} for doi, value in score.items())
+        if analysis_settings["ranking_scope"] == "common-references":
+            referenced_dois = set(edges.loc[edges["edge_type"].isin(["reference", "shared_reference"]), "target_doi"])
+            score = score.loc[score.index.isin(referenced_dois)]
+        scores[graph_name] = score
     ranking_summary, ranking_details = compare_rankings(scores, float(asp_settings.get("top_fraction", 0.10)))
+    for frame in (ranking_summary, ranking_details):
+        frame["graph_scope"] = analysis_settings["graph_scope"]
+        frame["ranking_scope"] = analysis_settings["ranking_scope"]
+    ranking_summary["left_eligible_work_count"] = ranking_summary["left_graph"].map(lambda name: len(scores[name]))
+    ranking_summary["right_eligible_work_count"] = ranking_summary["right_graph"].map(lambda name: len(scores[name]))
     return {
+        "analysis_scope": pd.DataFrame([{
+            **analysis_settings, "submitted_seed_count": len(references),
+            "clean_comparable_seed_count": int((references.get("comparison_group", pd.Series(dtype=str)) == "comparable_both_doi_sets_nonempty").sum()),
+            "network_seed_count": len(seed_dois),
+        }]),
         "reference_metrics": references,
         "reference_groups": reference_group_summary(references),
         "graph_statistics": graph_stats,
-        "asp_scores": pd.DataFrame(asp_rows),
+        "asp_scores": pd.DataFrame(asp_rows, columns=["graph", "doi", "asp_score", "iterations", "converged", "max_change"]),
         "ranking_agreement": ranking_summary,
         "ranking_details": ranking_details,
     }
@@ -195,6 +232,7 @@ def run_offline(
     input_dir: Path,
     output_dir: Path | None = None,
     asp_overrides: dict[str, object] | None = None,
+    analysis_overrides: dict[str, object] | None = None,
 ) -> Path:
     input_dir = Path(input_dir)
     source_manifest_path = input_dir / "run_manifest.json"
@@ -204,8 +242,8 @@ def run_offline(
     destination = Path(output_dir) if output_dir else input_dir / "reanalyzed"
     destination.mkdir(parents=True, exist_ok=True)
     asp_settings = {**source_manifest.get("asp_settings", {}), **(asp_overrides or {})}
-    tables = calculate_tables(snapshots, asp_settings)
-    outputs = write_tables(destination, tables, source_manifest)
+    analysis_settings = resolve_analysis_settings({**source_manifest.get("analysis_settings", {}), **(analysis_overrides or {})})
+    tables = calculate_tables(snapshots, asp_settings, analysis_settings)
     manifest = {
         "run_id": destination.name,
         "status": "completed",
@@ -213,11 +251,14 @@ def run_offline(
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "seed_doi_count": len(snapshots.get("seed_dois", [])),
         "asp_settings": asp_settings,
-        "snapshots": {"all_snapshots": str(snapshot_path.relative_to(input_dir)).replace("\\", "/")},
-        "outputs": {key: str(path.relative_to(destination)) for key, path in outputs.items()},
+        "analysis_settings": analysis_settings,
         "source_retrieved_at_utc": snapshots.get("retrieved_at_utc"),
+        "source_status": source_manifest.get("source_status", source_manifest.get("status")),
     }
-    manifest["snapshots"] = {}
+    # A reanalysis is a reusable bundle too, including the exact source snapshots.
+    manifest["snapshots"] = _save_snapshot_files(destination, snapshots)
+    outputs = write_tables(destination, tables, manifest)
+    manifest["outputs"] = {key: str(path.relative_to(destination)) for key, path in outputs.items()}
     manifest_path = destination / "run_manifest.json"
     write_manifest(manifest_path, manifest)
     return manifest_path

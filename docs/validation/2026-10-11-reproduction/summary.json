@@ -1,0 +1,12 @@
+{
+  "software_version": "0.1.1",
+  "network_requests": 0,
+  "checks": 517,
+  "failures": 0,
+  "passed": true,
+  "primary_disciplines": 5,
+  "robustness_networks": 30,
+  "reference_pair_comparisons": 30,
+  "citing_swap_comparisons": 15,
+  "historical_cutoff_policy": "Historic files retained unchanged; fixed and expanded cutoffs independently benchmarked from original saved scores using manuscript DOI ordering."
+}

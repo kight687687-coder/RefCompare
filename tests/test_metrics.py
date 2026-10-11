@@ -28,3 +28,26 @@ def test_rank_overlap_is_clipped_to_common_count():
     summary, _ = compare_rankings(scores)
     assert summary.loc[0, "top_fraction_n"] == 1
     assert summary.loc[0, "top_fraction_overlap_count"] == 1
+
+
+def test_cutoff_ties_are_deterministic_when_input_order_changes():
+    left = pd.Series({"c": 1.0, "b": 1.0, "a": 1.0, "d": 0.5})
+    right = pd.Series({"a": 2.0, "b": 1.0, "c": 1.0, "d": 0.4})
+    first, _ = compare_rankings({"OA": left, "CR": right}, top_fraction=0.5)
+    second, _ = compare_rankings({"OA": left.iloc[::-1], "CR": right}, top_fraction=0.5)
+    assert first.loc[0, "top_fraction_overlap_count"] == 2
+    assert second.loc[0, "top_fraction_overlap_count"] == 2
+    assert first.loc[0, "top_fraction_tie_expanded_left_size"] == 3
+    assert first.loc[0, "top_fraction_tie_expanded_right_size"] == 3
+    assert first.loc[0, "top_fraction_tie_expanded_jaccard"] == 1.0
+
+
+def test_absolute_cutoff_membership_uses_doi_order_and_keeps_all_cutoff_ties():
+    scores = pd.Series({f"doi-{i:02d}": 1.0 for i in range(12, 0, -1)})
+    summary, details = compare_rankings({"OA": scores, "CR": scores.iloc[::-1]})
+    expected = {f"doi-{i:02d}" for i in range(1, 11)}
+    assert set(details.loc[details.left_top10, "doi"]) == expected
+    assert set(details.loc[details.right_top10, "doi"]) == expected
+    assert summary.loc[0, "top10_tie_expanded_left_size"] == 12
+    assert summary.loc[0, "top10_tie_expanded_right_size"] == 12
+    assert summary.loc[0, "top10_tie_expanded_jaccard"] == 1.0

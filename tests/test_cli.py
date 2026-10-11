@@ -1,4 +1,11 @@
-from refcompare.cli import main
+from refcompare.cli import main, _parser
+
+
+def test_both_commands_accept_optional_analysis_scopes():
+    for arguments in (["run", "--dois", "seeds.txt", "--output", "out"], ["analyze", "--input-dir", "bundle"]):
+        args = _parser().parse_args([*arguments, "--graph-scope", "all-records", "--ranking-scope", "all-common-nodes"])
+        assert args.graph_scope == "all-records"
+        assert args.ranking_scope == "all-common-nodes"
 
 
 def test_help_returns_zero(capsys):

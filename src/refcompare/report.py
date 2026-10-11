@@ -31,6 +31,7 @@ def render_markdown_report(manifest: dict[str, Any], tables: dict[str, pd.DataFr
     rankings = tables.get("ranking_agreement", pd.DataFrame())
     seed_count = int(manifest.get("input_doi_count", manifest.get("seed_doi_count", len(references))))
     comparable_count = int((references.get("comparison_group", pd.Series(dtype=str)) == "comparable_both_doi_sets_nonempty").sum())
+    scope = tables.get("analysis_scope", pd.DataFrame())
     lines = [
         "# RefCompare results",
         "",
@@ -39,8 +40,17 @@ def render_markdown_report(manifest: dict[str, Any], tables: dict[str, pd.DataFr
         f"The run included **{seed_count} submitted seed DOI(s)**. A seed DOI identifies a work whose references were compared. **{comparable_count}** records had DOI-resolved references available from both sources and could be compared directly.",
         "",
     ]
+    if not scope.empty:
+        selected = scope.iloc[0]
+        graph_description = "clean-comparable seeds" if selected["graph_scope"] == "clean-comparable" else "all analyzed seed records"
+        ranking_description = "pairwise common referenced works, identified by reference-edge targets in both graphs" if selected["ranking_scope"] == "common-references" else "all pairwise common network nodes, including seed and citing roles"
+        lines.extend([f"Network construction used **{int(selected['network_seed_count'])} {graph_description}**. ASP was computed on each full network; ranking comparisons used **{ranking_description}**.", ""])
+        if not int(selected["network_seed_count"]):
+            lines.extend(["No seeds qualified for the selected network scope; no network rankings are available. The analysis does not fall back to a broader scope.", ""])
     if manifest.get("status") in {"partial", "failed"}:
         lines.extend([f"Run status: **{manifest['status']}**. Some API records could not be retrieved; the tables retain these cases as failures rather than treating them as empty reference lists.", ""])
+    elif manifest.get("source_status") in {"partial", "failed"}:
+        lines.extend([f"Source retrieval status: **{manifest['source_status']}**. Offline analysis reuses these incomplete snapshots; no additional API records were fetched.", ""])
     if not groups.empty:
         lines.extend(["### Retrieval and comparison groups", "", "| Record state | Works | Share |", "|---|---:|---:|"])
         for row in groups.to_dict("records"):
@@ -61,10 +71,10 @@ def render_markdown_report(manifest: dict[str, Any], tables: dict[str, pd.DataFr
     else:
         lines.append("No seed had DOI-resolved reference sets from both sources, so no direct reference-set similarity summary is available.")
     lines.extend(["", "## Ranking impact", "", "ASP is a local prestige-style score calculated within each constructed one-hop network. The three networks vary the reference edges (OpenAlex, Crossref, or shared references) while keeping the retrieved citing-work edges the same. ASP values should be interpreted within this constructed sample, not as absolute scholarly prestige.", ""])
-    if rankings.empty:
-        lines.append("Ranking comparisons were unavailable because the networks had no scored objects in common.")
+    if rankings.empty or not rankings["common_node_count"].gt(0).any():
+        lines.append("Ranking comparisons were unavailable because no objects qualified in both graphs under the selected ranking scope.")
     else:
-        lines.extend(["| Graph comparison | Common works | Kendall tau-b | Spearman rho | Top-decile overlap | Mean rank displacement |", "|---|---:|---:|---:|---:|---:|"])
+        lines.extend(["| Graph comparison | Common works | Kendall tau-b | Spearman rho | Top-fraction overlap | Mean rank displacement |", "|---|---:|---:|---:|---:|---:|"])
         for row in rankings.to_dict("records"):
             comparison = f"{row.get('left_graph', '?')} vs {row.get('right_graph', '?')}"
             lines.append(f"| {comparison} | {int(row.get('common_node_count', 0))} | {_number(row.get('kendall_tau_b'))} | {_number(row.get('spearman_rho'))} | {_number(row.get('top_fraction_overlap_rate'), 1)} | {_number(row.get('rank_displacement_mean'))} |")

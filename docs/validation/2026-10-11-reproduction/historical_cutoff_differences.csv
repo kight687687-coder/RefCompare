@@ -1,0 +1,7 @@
+﻿discipline,left,right,cutoff,historical_overlap,doi_ordered_overlap
+medicine,Graph_CR,Graph_Shared,top10,4,10
+history,Graph_CR,Graph_Shared,top10,9,10
+history,Graph_CR,Graph_Shared,top20,18,19
+physics,Graph_OA,Graph_CR,top_fraction,4548,4549
+physics,Graph_OA,Graph_Shared,top_fraction,4536,4537
+physics,Graph_CR,Graph_Shared,top_fraction,4791,4832

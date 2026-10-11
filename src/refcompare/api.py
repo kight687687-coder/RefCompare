@@ -8,6 +8,8 @@ from typing import Any
 
 import requests
 
+from . import __version__
+
 
 class ApiRequestError(RuntimeError):
     """A safe, user-facing error for failed API calls."""
@@ -126,7 +128,7 @@ class CrossrefClient:
     def __init__(self, settings: ApiSettings, session: requests.Session | None = None):
         self.settings = settings
         self.session = session or requests.Session()
-        self.session.headers.update({"User-Agent": f"RefCompare/0.1.0 (mailto:{settings.mailto})"})
+        self.session.headers.update({"User-Agent": f"RefCompare/{__version__} (mailto:{settings.mailto})"})
 
     def get_work(self, doi: str) -> dict[str, Any]:
         url = f"https://api.crossref.org/works/{requests.utils.quote(doi, safe='') }"

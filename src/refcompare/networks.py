@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from .identifiers import normalize_doi
+from .identifiers import normalize_record_doi as normalize_doi
 
 GRAPH_NAMES = ("Graph_OA", "Graph_CR", "Graph_Shared")
 EDGE_COLUMNS = ["source_doi", "target_doi", "edge_type"]

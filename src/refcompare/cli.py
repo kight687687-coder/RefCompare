@@ -36,6 +36,9 @@ def _parser() -> argparse.ArgumentParser:
     analyze.add_argument("--tolerance", type=float)
     analyze.add_argument("--max-iter", type=int)
     analyze.add_argument("--top-fraction", type=float)
+    for command in (run, analyze):
+        command.add_argument("--graph-scope", choices=("clean-comparable", "all-records"), help="network seeds (default: clean-comparable; offline inherits saved setting)")
+        command.add_argument("--ranking-scope", choices=("common-references", "all-common-nodes"), help="pairwise comparison objects (default: common-references; offline inherits saved setting)")
     return parser
 
 
@@ -67,12 +70,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print("Error: the file contains no valid DOI.", file=sys.stderr)
                 return 2
             settings = ApiSettings(args.mailto, args.openalex_api_key)
-            manifest = run_online(dois, args.output, settings, _non_none_options(args))
+            analysis_options = {key: getattr(args, key) for key in ("graph_scope", "ranking_scope") if getattr(args, key) is not None}
+            manifest = run_online(dois, args.output, settings, _non_none_options(args), analysis_options)
             print(f"Finished. Run manifest: {manifest}")
             print(f"Results report: {manifest.parent / 'summary.md'}")
             return 0
         overrides = _non_none_options(args)
-        manifest = run_offline(args.input_dir, args.output, overrides)
+        analysis_options = {key: getattr(args, key) for key in ("graph_scope", "ranking_scope") if getattr(args, key) is not None}
+        manifest = run_offline(args.input_dir, args.output, overrides, analysis_options)
         print(f"Offline analysis finished. Run manifest: {manifest}")
         print(f"Results report: {manifest.parent / 'summary.md'}")
         return 0
